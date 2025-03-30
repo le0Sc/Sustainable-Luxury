@@ -1,0 +1,137 @@
+# Load necessary libraries
+library(readxl)      # Read Excel files
+library(dplyr)       # Data manipulation
+library(psych)       # Psychometric analysis (e.g., Cronbach’s alpha, factor analysis)
+library(lavaan)      # Structural Equation Modeling (SEM)
+library(semPlot)     # Visualization of SEM results
+library(ggplot2)     # Data visualization
+library(GGally)      # Extended functionalities for ggplot2
+
+# Set working directory
+setwd("C:\\Users\\Mai Hoang Anh\\OneDrive\\Documents\\R Stats\\Sustainable Luxury")
+
+# Load the dataset from an Excel file
+data <- read_excel("Survey_Responses.xlsx")
+
+# Basic data exploration
+str(data)  # Check the structure of the dataset
+summary(data)  # Summary statistics of the dataset
+sum(is.na(data))  # Count missing values in the dataset
+
+# Compute descriptive statistics for each variable
+desc_stats <- data.frame(
+  Variable = colnames(data),
+  Mean = sapply(data, mean, na.rm = TRUE),
+  SD = sapply(data, sd, na.rm = TRUE),
+  Min = sapply(data, min, na.rm = TRUE),
+  Max = sapply(data, max, na.rm = TRUE),
+  Skewness = sapply(data, psych::skew, na.rm = TRUE)  # Measure asymmetry of distribution
+)
+
+# Display descriptive statistics in a formatted table
+knitr::kable(desc_stats, caption = "Descriptive Statistics Table")
+
+# Group survey items into constructs (theoretical groupings based on the questionnaire)
+constructs <- list(
+  Functional_Value = data %>% select(starts_with("FUNC")),
+  Symbolic_Value = data %>% select(starts_with("SYMB")),
+  Financial_Value = data %>% select(starts_with("FIN")),
+  Purchase_Intention = data %>% select(starts_with("PI_")),
+  Brand_Prominence = data %>% select(starts_with("Brand_Prom")),
+  Brand_Self_Connection = data %>% select(starts_with("Brand_self")),
+  Brand_Consciousness = data %>% select(starts_with("Brand_Cons"))
+)
+
+# Compute Cronbach's Alpha for each construct to assess internal consistency (reliability)
+cronbach_alpha <- sapply(constructs, function(x) psych::alpha(x)$total$raw_alpha)
+
+# Add Cronbach’s Alpha to the descriptive statistics table
+desc_stats$Cronbach_Alpha <- NA
+for (construct in names(constructs)) {
+  desc_stats$Cronbach_Alpha[desc_stats$Variable %in% colnames(constructs[[construct]])] <- cronbach_alpha[construct]
+}
+
+# Display updated descriptive statistics table
+knitr::kable(desc_stats, caption = "Descriptive Statistics with Cronbach’s Alpha")
+
+# Prepare data for Exploratory Factor Analysis (EFA) by selecting relevant survey items
+efa_data <- data[, c("FUNC1","FUNC2","FUNC3","FUNC4","FUNC5",
+                     "SYMB1","SYMB2","SYMB3","SYMB4","SYMB5","SYMB6",
+                     "FIN1","FIN2","FIN3","FIN4",
+                     "PI_1","PI_2","PI_3","PI_4","PI_5",
+                     "Brand_Prom1","Brand_Prom2","Brand_Prom3","Brand_Prom4","Brand_Prom5",
+                     "Brand_self_1","Brand_self_2","Brand_self_3","Brand_self_4","Brand_self_5",
+                     "Brand_Cons_1","Brand_Cons_2","Brand_Cons_3","Brand_Cons_4","Brand_Cons_5")]
+
+# Perform Kaiser-Meyer-Olkin (KMO) test for factorability (should be > 0.6)
+KMO(efa_data)
+
+# Perform Bartlett’s test of sphericity (p-value should be < 0.05 for factor analysis to be valid)
+cortest.bartlett(efa_data)
+
+# Conduct Exploratory Factor Analysis (EFA) using Maximum Likelihood Estimation with Promax rotation
+efa_result <- fa(efa_data, nfactors = 5, rotate = "promax", fm = "ml")
+
+# Print factor loadings to interpret the structure
+print(efa_result$loadings)
+
+# Visualize factor structure using a diagram
+fa.diagram(efa_result)
+
+# Define the Confirmatory Factor Analysis (CFA) model structure
+model_cfa <- '
+  FUNC =~ FUNC1 + FUNC2 + FUNC3 + FUNC4 + FUNC5
+  SYMB =~ SYMB1 + SYMB2 + SYMB3 + SYMB4 + SYMB5 + SYMB6
+  FIN  =~ FIN1 + FIN2 + FIN3 + FIN4
+  PI   =~ PI_1 + PI_2 + PI_3 + PI_4 + PI_5
+  Brand_Prom =~ Brand_Prom1 + Brand_Prom2 + Brand_Prom3 + Brand_Prom4 + Brand_Prom5
+  Brand_Self =~ Brand_self_1 + Brand_self_2 + Brand_self_3 + Brand_self_4 + Brand_self_5
+  Brand_Cons =~ Brand_Cons_1 + Brand_Cons_2 + Brand_Cons_3 + Brand_Cons_4 + Brand_Cons_5
+'
+
+# Run the CFA model using the 'lavaan' package
+cfa_result <- cfa(model_cfa, data = data)
+
+# Display CFA results including fit indices and standardized estimates
+summary(cfa_result, fit.measures = TRUE, standardized = TRUE)
+
+# Visualize CFA model using a path diagram
+semPaths(cfa_result, what = "std", layout = "circle", edge.label.cex = 1.2)
+
+# Define the Structural Equation Model (SEM) for hypothesis testing
+model_sem <- '
+  # Phantom Variable for Sustainable Luxury (not directly measured)
+  Sustainable_Luxury =~ 1*Sustainable_Luxury_Dummy
+  Sustainable_Luxury_Dummy ~~ 0*Sustainable_Luxury_Dummy  # Fix variance to 0
+
+  # Measurement Model (Latent Variables)
+  Functional_Value  =~ FUNC1 + FUNC2 + FUNC3 + FUNC4 + FUNC5
+  Symbolic_Value    =~ SYMB1 + SYMB2 + SYMB3 + SYMB4 + SYMB5 + SYMB6
+  Financial_Value   =~ FIN1 + FIN2 + FIN3 + FIN4
+  Purchase_Intention =~ PI_1 + PI_2 + PI_3 + PI_4 + PI_5
+  Brand_Attachment  =~ Brand_self_1 + Brand_self_2 + Brand_self_3 + Brand_self_4 + Brand_self_5
+
+  # Structural Model (Hypothesis Testing)
+  Functional_Value  ~ Sustainable_Luxury  # H1a
+  Symbolic_Value    ~ Sustainable_Luxury  # H1b
+  Financial_Value   ~ Sustainable_Luxury  # H1c
+
+  Purchase_Intention ~ Functional_Value  # H2a
+  Purchase_Intention ~ Symbolic_Value    # H2b
+  Purchase_Intention ~ Financial_Value   # H2c
+
+  Brand_Attachment ~ Functional_Value  # H3a
+  Brand_Attachment ~ Symbolic_Value    # H3b
+  Brand_Attachment ~ Financial_Value   # H3c
+
+  Purchase_Intention ~ Brand_Attachment  # H4
+'
+
+# Create a dummy variable for Sustainable Luxury (phantom latent variable)
+data$Sustainable_Luxury_Dummy <- rnorm(nrow(data), mean = 1, sd = 0.01)
+
+# Run the SEM model using the 'lavaan' package
+sem_result <- sem(model_sem, data = data)
+
+# Display SEM results including fit indices and standardized path coefficients
+summary(sem_result, fit.measures = TRUE, standardized = TRUE)
